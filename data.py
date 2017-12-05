@@ -355,9 +355,53 @@ def get_embedding(sense_embedding_file):
                 vec[i-1] = float(value[i])
         sense_embeddings__[key] = vec    
     return sense_embeddings__
+
+def convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, target_sense_to_context_embedding, is_training=True):
+    
+    n_senses_sorted_by_target_id = [n_senses_from_word_id[target_id] for target_id in range(len(n_senses_from_word_id))]
+    starts = (np.cumsum(np.append([0], n_senses_sorted_by_target_id)))[:-1]
+    tot_n_senses = sum(n_senses_from_word_id.values())
+
+    all_data = []
+    #target_tag_id = word_to_id['<target>']
+    #print(target_tag_id)
+    for instance in data:
+        words = split_context(instance['context'])            
+        target_word = instance['target_word'] 
+        
+        ctx_ints = [word_to_id[word] for word in words if word in word_to_id]
+        stop_idx = words.index('<target>')
+        #print(stop_idx)
+        #print(ctx_ints)
+        
+        _instance = []
+        #stop_idx = ctx_ints.index(target_tag_id)
+        xf = np.array(ctx_ints[:stop_idx])
+        xb = np.array(ctx_ints[stop_idx+1:])[::-1]               
+       # print("xf", len(xf))
+       # print("xb", len(xb))
+        
+        instance_id = instance['id']          
+        target_id = target_word_to_id[target_word]
+        
+        _instance.append(xf)
+        _instance.append(xb)
+        _instance.append(instance_id)
+      #  print(len(_instance))
+        if is_training:                   
+            target_sense = instance['target_sense']   
+            if instance_id in target_sense_to_context_embedding:
+                sense_embedding = target_sense_to_context_embedding[instance_id]
+                senses = target_sense_to_id[target_id]
+                sense_id = senses[target_sense] if target_sense else -1
+                _instance.append(sense_embedding)       
+     #   print(len(_instance))
+        all_data.append(_instance[:])
+    #print(len(all_data))
+    return all_data
         
 
-def convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, sense_embeddings_, is_training=True):
+def convert_to_numeric2(data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, target_sense_to_context_embedding, is_training=True):
     
     n_senses_sorted_by_target_id = [n_senses_from_word_id[target_id] for target_id in range(len(n_senses_from_word_id))]
     starts = (np.cumsum(np.append([0], n_senses_sorted_by_target_id)))[:-1]
@@ -367,19 +411,26 @@ def convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, 
         return starts[target_id] + sense_id
 
     all_data = []
-    target_tag_id = word_to_id['<target>']
+    #target_tag_id = word_to_id['<target>']
+    #print(target_tag_id)
     for instance in data:
-        words = split_context(instance['context'])    
+        words = split_context(instance['context'])            
+        target_word = instance['target_word'] 
+        
         ctx_ints = [word_to_id[word] for word in words if word in word_to_id]
-        stop_idx = ctx_ints.index(target_tag_id)
+        stop_idx = words.index('<target>')
+        print(stop_idx)
+        print(ctx_ints)
+        
+        #stop_idx = ctx_ints.index(target_tag_id)
         xf = np.array(ctx_ints[:stop_idx])
         xb = np.array(ctx_ints[stop_idx+1:])[::-1]               
+        print("xf", xf)
+        print("xb", xb)
         
         _instance = Instance()        
-        instance_id = instance['id']  
-        target_word = instance['target_word'] 
+        instance_id = instance['id']          
         target_id = target_word_to_id[target_word]
-        
         
         _instance.id = instance_id
         _instance.xf = xf
@@ -388,15 +439,14 @@ def convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, 
         
         if is_training:                   
             target_sense = instance['target_sense']   
-            if target_sense not in sense_embeddings_:
-                continue
-            sense_embedding = sense_embeddings_[target_sense]
-            senses = target_sense_to_id[target_id]
-            sense_id = senses[target_sense] if target_sense else -1
-        
-            _instance.sense_embedding = sense_embedding
-            _instance.sense_id = sense_id
-            _instance.one_hot_labels = one_hot_encode(n_senses_from_word_id[target_id], sense_id)            
+            if target_sense in target_sense_to_context_embedding:                
+                sense_embedding = target_sense_to_context_embedding[target_sense]
+                senses = target_sense_to_id[target_id]
+                sense_id = senses[target_sense] if target_sense else -1
+            
+                _instance.sense_embedding = sense_embedding
+                _instance.sense_id = sense_id
+                _instance.one_hot_labels = one_hot_encode(n_senses_from_word_id[target_id], sense_id)            
             
         # instance.one_hot_labels = one_hot_encode(tot_n_senses, get_tot_id(target_id, sense_id))
 
@@ -405,6 +455,12 @@ def convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, 
     return all_data
 
 def group_by_target(ndata):
+    res = {}
+    for key, group in groupby(ndata, lambda inst: inst[2]):
+       res.update({key: list(group)})
+    return res
+
+def group_by_target2(ndata):
     res = {}
     for key, group in groupby(ndata, lambda inst: inst.target_id):
        res.update({key: list(group)})
@@ -437,7 +493,8 @@ def get_data(_data, n_step_f, n_step_b):
     forward_data, backward_data, target_sense_ids, sense_embeddings = [], [], [], []
     for target_id, data in _data.items():
         for instance in data:
-            xf, xb, target_sense_id, sense_embedding = instance.xf, instance.xb, instance.id, instance.sense_embedding
+            #xf, xb, target_sense_id, sense_embedding = instance.xf, instance.xb, instance.id, instance.sense_embedding
+            xf, xb, target_sense_id, sense_embedding = instance[0], instance[1], instance[2], instance[3]
             
             n_to_use_f = min(n_step_f, len(xf))
             n_to_use_b = min(n_step_b, len(xb))
@@ -452,6 +509,10 @@ def get_data(_data, n_step_f, n_step_b):
             backward_data.append(xbs)
             target_sense_ids.append(target_sense_id)
             sense_embeddings.append(sense_embedding)
+            
+            #print("xf", len(xf))
+            #print("xfs", len(xfs))
+            #print("sense_embedding", sense_embedding)
     
     return (np.array(forward_data), np.array(backward_data), np.array(target_sense_ids), np.array(sense_embeddings))
 
@@ -568,30 +629,30 @@ if __name__ == '__main__':
     
     target_id_to_sensekey = get_target_id_to_wordnet(senseval_key)
     
-    #target_sense_to_context_embedding = build_embedding(target_sense_to_context, embedding_matrix, len(word_to_id), 100)
-    
+    target_sense_to_context_embedding = build_embedding(target_sense_to_context, embedding_matrix, len(word_to_id), 100)
+    '''
     sense_vectors = build_embedding2(target_sense_to_id, EMBEDDING_DIM)
     with open('senseval_sense_embedding.csv','w', newline='') as f:
         w = csv.writer(f)
         for key, value in sense_vectors.items():
             w.writerow([key, value])
-    sense_embeddings_ = get_embedding(sense_embedding_file) 
+    sense_embeddings_ = get_embedding(sense_embedding_file) '''
     
     # make numeric
-    ndata = convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, sense_embeddings_, is_training=True)
-    test_ndata = convert_to_numeric(test_data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, sense_embeddings_, is_training = False)
+    ndata = convert_to_numeric(data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, target_sense_to_context_embedding, is_training=True)
+    #test_ndata = convert_to_numeric(test_data, word_to_id, target_word_to_id, target_sense_to_id, n_senses_from_word_id, sense_embeddings_, is_training = False)
     
     
     n_step_f = 40
     n_step_b = 40
     # batch_generator(50, ndata, word_to_id['<pad>'])
     grouped_by_target = group_by_target(ndata)
-    train_data, val_data = split_grouped(grouped_by_target, .2, 2)
+    train_data, val_data = split_grouped(grouped_by_target, 0)
     #train_data = batchify_grouped(train_data, n_step_f, n_step_b, word_to_id['<pad>'], n_senses_from_word_id, 100)
     #val_data = batchify_grouped(val_data, n_step_f, n_step_b, word_to_id['<pad>'], n_senses_from_word_id, 100)
     
-    test_grouped_by_target = group_by_target(test_ndata)
-    test_data_ = split_grouped(test_grouped_by_target, 0)
+    #test_grouped_by_target = group_by_target(test_ndata)
+    #test_data_ = split_grouped(test_grouped_by_target, 0)
 
     train_forward_data, train_backward_data, train_target_sense_ids, train_sense_embedding = get_data(train_data, n_step_f, n_step_b)
     #test_forward_data, test_backward_data, test_target_sense_ids, test_sense_embedding = get_data(test_data_, n_step_f, n_step_b)
