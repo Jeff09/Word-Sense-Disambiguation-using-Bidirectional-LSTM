@@ -10,9 +10,9 @@ File description:
   
   * globe.py   load the pre-trained Glove word embedding vector for our own dataset
   
-  * sense_embedding.py   the 100-dimension sense vector of Google - Word Sense Disambiguation corpora
+  * sense_embedding.csv   the 100-dimension sense vector of Google - Word Sense Disambiguation corpora
   
-  * senseval_sense_embedding.py   the 100-dimensiion sense vector of Senseval2 dataset
+  * senseval_sense_embedding.csv   the 100-dimensiion sense vector of Senseval2 dataset
   
   * Final_report.docx   descript the whole idea of this project
   
